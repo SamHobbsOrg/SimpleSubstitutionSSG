@@ -1,0 +1,9 @@
+{
+  "profiles": {
+    "SimpleSubstitutionSSG": {
+      "commandName": "Project",
+      "commandLineArgs": "\"Configuration.yaml\"",
+      "workingDirectory": "M:\\Temporary\\PromptUniversity"
+    }
+  }
+}
