@@ -27,6 +27,7 @@ internal sealed class ConfigValidator
             "snippets_dir",
             "block_substitutions",
             "inline_substitutions",
+            "debug",
         };
     }
 
@@ -44,12 +45,14 @@ internal sealed class ConfigValidator
 /// <param name="SnippetsDir">The directory containing snippet files.</param>
 /// <param name="BlockSubstitutions">Dictionary of block substitutions mapping names to file paths and line numbers.</param>
 /// <param name="InlineSubstitutions">Dictionary of inline substitutions mapping names to text and line numbers.</param>
+/// <param name="Debug">When true, emit informational messages about directories and file copies.</param>
 internal record Configuration(
     string InputDir,
     string OutputDir,
     string SnippetsDir,
     Dictionary<string, (string file, int line)> BlockSubstitutions,
-    Dictionary<string, (string text, int line)> InlineSubstitutions
+    Dictionary<string, (string text, int line)> InlineSubstitutions,
+    bool Debug
 );
 
 /// <summary>
@@ -61,7 +64,6 @@ internal static partial class Program
     private static int Main(string[] args)
     {
         string baseDir = Environment.GetEnvironmentVariable("GITHUB_WORKSPACE") ?? Directory.GetCurrentDirectory();
-        // bool runnerIsAction = Environment.GetEnvironmentVariable("GITHUB_WORKSPACE") != null;
         try
         {
             string configPath = args.Length > 0 ? args[0] : "conf.yml";
@@ -112,7 +114,15 @@ internal static partial class Program
             return errorCode;
         }
 
-        CopyDirectoryContents(config!.InputDir, config.OutputDir);
+        if (config!.Debug)
+        {
+            Console.WriteLine($"::notice ::Debug mode is on");
+            Console.WriteLine($"::notice ::Input directory: {config.InputDir}");
+            Console.WriteLine($"::notice ::Output directory: {config.OutputDir}");
+            Console.WriteLine($"::notice ::Snippets directory: {config.SnippetsDir}");
+        }
+
+        CopyDirectoryContents(config.InputDir, config.OutputDir, config.Debug);
 
         ImmutableDictionary<string, string> snippetCache = BuildSnippetCache(config.BlockSubstitutions, config.SnippetsDir, configPath);
 
@@ -180,11 +190,22 @@ internal static partial class Program
         string snippetsDirRaw = GetScalar(rootMapping, "snippets_dir");
 
         if (string.IsNullOrEmpty(inputDirRaw))
+        {
             inputDirRaw = "src";
+        }
         if (string.IsNullOrEmpty(outputDirRaw))
+        {
             outputDirRaw = "public";
+        }
         if (string.IsNullOrEmpty(snippetsDirRaw))
+        {
             snippetsDirRaw = "snippets";
+        }
+
+        string debugRaw = GetScalar(rootMapping, "debug");
+        bool debug = debugRaw.Equals("on", StringComparison.OrdinalIgnoreCase)
+                  || debugRaw.Equals("yes", StringComparison.OrdinalIgnoreCase)
+                  || debugRaw.Equals("true", StringComparison.OrdinalIgnoreCase);
 
         string inputDir = ResolvePath(inputDirRaw, baseDir);
         string outputDir = ResolvePath(outputDirRaw, baseDir);
@@ -198,21 +219,25 @@ internal static partial class Program
         {
             (bool flowControl, Configuration? value) = ProcessBlockSubstitutions(configPath, out errorCode, blockSubs, bsSeq);
             if (!flowControl)
+            {
                 return value;
+            }
         }
 
         if (rootMapping.Children.TryGetValue(new YamlScalarNode("inline_substitutions"), out YamlNode? isNode) && isNode is YamlSequenceNode isSeq)
         {
             (bool flowControl, Configuration? value) = ProcessInlineSubstitutions(configPath, out errorCode, inlineSubs, isSeq);
             if (!flowControl)
+            {
                 return value;
+            }
         }
 
         (Dictionary<string, (string file, int line)> blockDict, Dictionary<string, (string text, int line)> inlineDict) =
             BuildSubstitutionDictionaries(blockSubs, inlineSubs, configPath);
 
         errorCode = 0;
-        return new Configuration(inputDir, outputDir, snippetsDir, blockDict, inlineDict);
+        return new Configuration(inputDir, outputDir, snippetsDir, blockDict, inlineDict, debug);
     }
 
     private static (bool flowControl, Configuration? value) ProcessInlineSubstitutions(string configPath, out int errorCode, List<(string name, string text, int line)> inlineSubs, YamlSequenceNode isSeq)
@@ -425,7 +450,7 @@ internal static partial class Program
         return 0;
     }
 
-    private static void CopyDirectoryContents(string inputDir, string outputDir)
+    private static void CopyDirectoryContents(string inputDir, string outputDir, bool debug)
     {
         Stack<(string src, string dst)> stack = new ();
         stack.Push((inputDir, outputDir));
@@ -437,6 +462,10 @@ internal static partial class Program
             {
                 string destFile = Path.Combine(dst, Path.GetFileName(file));
                 File.Copy(file, destFile, overwrite: true);
+                if (debug)
+                {
+                    Console.WriteLine($"::notice ::Copied {file} to {destFile}");
+                }
             }
 
             foreach (string dir in Directory.GetDirectories(src))
