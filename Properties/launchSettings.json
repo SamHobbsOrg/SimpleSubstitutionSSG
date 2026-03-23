@@ -2,7 +2,7 @@
   "profiles": {
     "SimpleSubstitutionSSG": {
       "commandName": "Project",
-      "commandLineArgs": "M:\\Temporary\\PromptUniversity\\\"Configuration.yaml\""
+      "commandLineArgs": "\"Configuration.yaml\""
     }
   }
 }
